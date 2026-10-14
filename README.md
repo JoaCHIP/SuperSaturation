@@ -8,3 +8,5 @@ The plugin currently has these adjustments:
 - Contrast: This adjusts the contrast in such a way that the colors are retained.
 - Warmth: A kind of white balance adjustment.
 - Hue Shift: Similar to Photoshop's hue shift, but looks different.
+
+Original old web page for this: https://www.robotplanet.dk/graphics/supersaturation/
