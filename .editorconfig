@@ -1,0 +1,24 @@
+# top-most EditorConfig file
+root = true
+
+[*]
+end_of_line = lf
+indent_style = tab
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+charset = utf-8
+
+[*.md]
+trim_trailing_whitespace = false
+
+# config / xml like files
+[*.{config,config.dist,xml,xsd,xslt,wxs}]
+indent_size = 2
+
+# curly brace syntax languages
+[*.{php,js,pl,c,cpp,h,rs}]
+indent_style = tab
+indent_size = 4
+indent_brace_style = Allman
+curly_bracket_next_line = true
