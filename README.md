@@ -10,3 +10,6 @@ The plugin currently has these adjustments and ranges:
 - Hue Shift (-180 to 180°): Similar to Photoshop's hue shift, but looks different.
 
 Original old web page for this: https://www.robotplanet.dk/graphics/supersaturation/
+
+ToDo:
+- Replace number input fields with proper sliders.
