@@ -1,0 +1,28 @@
+[package]
+name = "supersaturation"
+description = "SuperSaturation by JoaCHIP: a PhotoCraft WebAssembly filter plug-in"
+version = "1.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+# cdylib: the .wasm plug-in. rlib: lets the native tests and the benchmark link the same code.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Pure-Rust float maths (powf, cosf, atan2f, …) for the no_std wasm build. Used on every target,
+# so the native tests run exactly the same maths as the plug-in.
+libm = "0.2"
+
+[profile.release]
+# The host interprets the module, so the instruction count per pixel is what matters: optimise for
+# speed rather than size.
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[dev-dependencies]
+serde_json = { version = "1", features = ["preserve_order"] }
