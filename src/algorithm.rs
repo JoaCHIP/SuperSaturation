@@ -36,7 +36,7 @@ pub struct Settings {
     pub liveliness: f32,
     /// -100 to 100; neutral 0.
     pub gamma: f32,
-    /// -100 to 100 in the original; neutral 0. The dialog's -100 to 100 doubles to -200 to 200.
+    /// -100 to 100 in the original; neutral 0. The dialog's -100 to 100 maps to about -175 to 200.
     pub contrast: f32,
     /// -100 to 100; neutral 0.
     pub warmth: f32,

@@ -6,9 +6,21 @@
 //!
 //! Two sliders read differently in the dialog than in the original filter, and are mapped here:
 //! Saturation runs -100 to 100 with 0 neutral (the original's 0 to 200 with 100 neutral, shifted
-//! by 100), and Contrast acts twice as strongly as the original's (its value is doubled).
+//! by 100), and Contrast acts more strongly than the original's: twice as strongly upwards, and
+//! downwards as strongly as it can without reversing tones (see [`NEGATIVE_CONTRAST_GAIN`]).
+
+use core::f32::consts::FRAC_PI_2;
 
 use crate::algorithm::Settings;
+
+/// How much stronger than the original positive Contrast acts.
+const POSITIVE_CONTRAST_GAIN: f32 = 2.0;
+
+/// How much stronger than the original negative Contrast acts: the most it can without reversing.
+/// Contrast blends the brightness `v` with an S-curve whose slope peaks at π/2 at mid-grey, so the
+/// curve's slope there is `1 + k·(π/2 − 1)` for a blend factor `k` (-1 at the original's -100).
+/// This gain makes it exactly 0 at the dialog's -100: mid-tones go flat but never reverse.
+const NEGATIVE_CONTRAST_GAIN: f32 = 1.0 / (FRAC_PI_2 - 1.0);
 
 /// The JSON could not be read.
 #[derive(Debug, PartialEq, Eq)]
@@ -20,7 +32,8 @@ type Result<T> = core::result::Result<T, ParseError>;
 /// value.
 pub fn parse(json: &[u8]) -> Result<Settings> {
     let dialog = parse_dialog(json)?;
-    Ok(Settings { saturation: dialog.saturation + 100.0, contrast: dialog.contrast * 2.0, ..dialog })
+    let gain = if dialog.contrast < 0.0 { NEGATIVE_CONTRAST_GAIN } else { POSITIVE_CONTRAST_GAIN };
+    Ok(Settings { saturation: dialog.saturation + 100.0, contrast: dialog.contrast * gain, ..dialog })
 }
 
 /// The six values as the dialog shows them (Saturation neutral at 0); missing ones are neutral.
@@ -200,13 +213,13 @@ mod tests {
 
     #[test]
     fn reads_the_hosts_parameters() {
-        let json = br#"{"saturation": 50, "liveliness": -20.5, "gamma": 1e1, "contrast": -40,
+        let json = br#"{"saturation": 50, "liveliness": -20.5, "gamma": 1e1, "contrast": 40,
             "warmth": 0.25, "hueShift": -180,
             "_image": {"x": 0, "y": 256, "width": 1024, "height": 256, "overlap": 0,
                        "canvasWidth": 6000, "canvasHeight": 4000, "mode": "rgb", "depth": 8,
                        "alpha": true, "channels": 4, "nested": [1, {"a": null}, "x\"y"], "f": false}}"#;
         let s = parse(json).unwrap();
-        assert_eq!(s, Settings { saturation: 150.0, liveliness: -20.5, gamma: 10.0, contrast: -80.0, warmth: 0.25, hue_shift: -180.0 });
+        assert_eq!(s, Settings { saturation: 150.0, liveliness: -20.5, gamma: 10.0, contrast: 80.0, warmth: 0.25, hue_shift: -180.0 });
     }
 
     #[test]
@@ -217,6 +230,24 @@ mod tests {
         assert_eq!(parse(br#"{"saturation":-100,"contrast":100}"#).unwrap(), Settings { saturation: 0.0, contrast: 200.0, ..Settings::default() });
         // `_image` nested keys must not be mistaken for parameters.
         assert_eq!(parse(br#"{"_image":{"gamma":7}}"#).unwrap(), Settings::default());
+    }
+
+    #[test]
+    fn negative_contrast_flattens_mid_tones_without_reversing_them() {
+        use crate::algorithm::{Precalc, tone};
+        let curve = |json: &[u8]| {
+            let t = Precalc::new(&parse(json).unwrap());
+            (0..=1000).map(|i| tone(i as f32 / 1000.0, &t)).collect::<Vec<f32>>()
+        };
+        for gamma in [-100, -40, 0, 40, 100] {
+            let c = curve(format!(r#"{{"contrast":-100,"gamma":{gamma}}}"#).as_bytes());
+            let worst = c.windows(2).map(|w| w[1] - w[0]).fold(f32::INFINITY, f32::min);
+            assert!(worst > -1e-6, "gamma {gamma}: a step goes down by {worst}");
+        }
+        // Still stronger than the original's -100: the mid-tones are flatter.
+        let original = Precalc::new(&Settings { contrast: -100.0, ..Settings::default() });
+        let c = curve(br#"{"contrast":-100}"#);
+        assert!(c[600] - c[400] < tone(0.6, &original) - tone(0.4, &original));
     }
 
     #[test]
