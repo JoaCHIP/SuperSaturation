@@ -36,10 +36,7 @@ same code: PhotoCraft hands plug-ins 0-1 floats at every depth. As in the Photos
 results are not clamped, so strong settings can leave values above 1 or below 0 there (8- and
 16-bit documents clamp them when storing).
 
-Other modes (Grayscale, CMYK, Lab, etc) and alpha channels / Quick Mask are refused for now:
-PhotoCraft reports "pc_filter returned error code 1" and leaves the image untouched. Adding one is
-a branch in `filter()` in `src/lib.rs` that converts each pixel to RGB, calls `process_pixel()` and
-converts back. `ColorMode`'s documentation there says how for each mode.
+CMYK color is handled correctly, retaining the original channels as well as possible.
 
 | Code | Meaning |
 |---|---|
