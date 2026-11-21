@@ -1,6 +1,6 @@
 # SuperSaturation for PhotoCraft
 
-By **JoaCHIP**. A port of the [SuperSaturation](https://github.com/JoaCHIP/SuperSaturation)
+By **JoaCHIP**. A port of the [SuperSaturation](https://www.robotplanet.dk/graphics/supersaturation/)
 Photoshop filter to a PhotoCraft WebAssembly plug-in.
 
 SuperSaturation adjusts color in its own HSB-like color space, which keeps
