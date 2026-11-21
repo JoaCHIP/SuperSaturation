@@ -4,12 +4,13 @@
     write_psd(path, samples, depth, mode)
 
 `samples` is float64 H×W×C in the plug-in ABI's units (0–1; Lab as L*/100, (a* + 128)/255,
-(b* + 128)/255), `mode` the PSD colour mode number (1 Grayscale, 3 RGB, 9 Lab). Reading handles raw
+(b* + 128)/255; CMYK as ink, 0 none and 1 full), `mode` the PSD colour mode number (1 Grayscale,
+3 RGB, 4 CMYK, 9 Lab). Reading handles raw
 and PackBits (RLE) composites at 8, 16 and 32 bits; writing makes a layerless PSD with a raw
 composite, which PhotoCraft opens as a one-layer document.
 
-16-bit Lab PSDs keep a* and b* on Photoshop's scale, `32768 + 256 · a*`, not over 0–65535; both
-functions convert.
+16-bit Lab PSDs keep a* and b* on Photoshop's scale, `32768 + 256 · a*`, not over 0–65535, and
+CMYK PSDs store each ink inverted (0 is full ink); the functions convert both.
 """
 import struct
 
@@ -63,9 +64,12 @@ def read_psd(path):
         a /= 65535.0
         if mode == LAB:
             a[..., 1:3] = ((a[..., 1:3] * 65535.0 - 32768.0) / 256.0 + 128.0) / 255.0
+    if mode == CMYK and depth != 32:
+        a[..., :4] = 1.0 - a[..., :4]
     return a, depth, mode
 
 
+CMYK = 4
 LAB = 9
 
 
@@ -75,6 +79,8 @@ def write_psd(path, samples, depth, mode):
     if depth == 32:
         planes = a.astype(">f4")
     else:
+        if mode == CMYK:
+            a[..., :4] = 1.0 - a[..., :4]
         if depth == 16 and mode == LAB:
             a[..., 1:3] = (32768.0 + 256.0 * (a[..., 1:3] * 255.0 - 128.0)) / 65535.0
         top = 255.0 if depth == 8 else 65535.0
@@ -152,7 +158,7 @@ def read_psd_layer(path, index=0):
             if i == index and lh > 0 and lw > 0:
                 planes[cid] = np.frombuffer(raw, dtype=dtype).reshape(lh, lw)
         if i == index:
-            ids = [0] if mode == 1 else [0, 1, 2]
+            ids = [0] if mode == 1 else [0, 1, 2, 3] if mode == CMYK else [0, 1, 2]
             ids += [-1] if -1 in planes else []
             out = np.zeros((h, w, len(ids)))
             for k, cid in enumerate(ids):
@@ -163,6 +169,8 @@ def read_psd_layer(path, index=0):
                 out /= 65535.0
                 if mode == LAB:
                     out[..., 1:3] = ((out[..., 1:3] * 65535.0 - 32768.0) / 256.0 + 128.0) / 255.0
+            if mode == CMYK and depth != 32:
+                out[..., :4] = 1.0 - out[..., :4]
             return out, depth, mode
     raise IndexError(index)
 

@@ -13,7 +13,7 @@ pub mod lab;
 pub mod mathf;
 pub mod params;
 
-use algorithm::{Precalc, process_pixel, tone};
+use algorithm::{Precalc, process_cmy, process_pixel, tone, tone_ink};
 use lab::{LabPrecalc, process_lab};
 
 /// The manifest the host reads through `pc_manifest`: id, menu name, author and the parameters the
@@ -53,11 +53,11 @@ impl Format {
 
 /// The document colour modes, numbered as in the PSD format (and the plug-in ABI).
 ///
-/// Handled: RGB (the original transform), Grayscale (its brightness curve: Gamma and Contrast) and
-/// Lab (the transform worked out on L, a and b directly, see [`lab`]). Another mode gets its own
-/// branch in [`filter`]; CMYK, for instance, could convert each pixel to RGB, call
-/// [`process_pixel`] and convert back. Alpha channels and Quick Mask targets arrive as one Grayscale
-/// channel, so they get the Grayscale treatment.
+/// Handled: RGB (the original transform), Grayscale (its brightness curve: Gamma and Contrast), Lab
+/// (the transform worked out on L, a and b directly, see [`lab`]) and CMYK (C, M and Y through the
+/// RGB transform, K through the Grayscale curve, so the black separation keeps its shape). Another
+/// mode gets its own branch in [`filter`]. Alpha channels and Quick Mask targets arrive as one
+/// Grayscale channel, so they get the Grayscale treatment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ColorMode {
     Bitmap,
@@ -104,6 +104,16 @@ pub fn filter(samples: &mut [f32], channels: usize, format: Format, params_json:
             let lab = LabPrecalc::new(&t);
             map_pixels::<3, 4>(samples, channels, format.alpha, |c| process_lab(c, &t, &lab))
         }
+        // C, M and Y as the RGB colour they print; K as a grey, like Grayscale (untouched when
+        // Gamma and Contrast are neutral).
+        ColorMode::Cmyk if t.tone_is_identity() => map_pixels::<4, 5>(samples, channels, format.alpha, |[c, m, y, k]| {
+            let [c, m, y] = process_cmy([c, m, y], &t);
+            [c, m, y, k]
+        }),
+        ColorMode::Cmyk => map_pixels::<4, 5>(samples, channels, format.alpha, |[c, m, y, k]| {
+            let [c, m, y] = process_cmy([c, m, y], &t);
+            [c, m, y, tone_ink(k, &t)]
+        }),
         _ => Err(Error::UnsupportedMode),
     }
 }
@@ -271,11 +281,38 @@ mod tests {
     }
 
     #[test]
+    fn cmyk_runs_cmy_as_rgb_and_k_as_grey() {
+        const CMYK8: u32 = 8 | 4 << 16;
+        let ink = [0.1, 0.6, 0.9, 0.3];
+        // Saturation alone: C, M and Y move as the RGB colour they print, K stays exactly.
+        let params = br#"{"saturation":70,"hueShift":-25}"#;
+        let t = Precalc::new(&params::parse(params).unwrap());
+        let mut px = ink;
+        filter_buffer(&mut px, 1, 1, 4, CMYK8, params).unwrap();
+        let rgb = process_pixel([1.0 - ink[0], 1.0 - ink[1], 1.0 - ink[2]], &t);
+        assert_eq!(px, [1.0 - rgb[0], 1.0 - rgb[1], 1.0 - rgb[2], 0.3]);
+        // No colour left: C, M and Y equal, K still as it was.
+        let mut px = ink;
+        filter_buffer(&mut px, 1, 1, 4, CMYK8, br#"{"saturation":-100}"#).unwrap();
+        assert!((px[0] - px[1]).abs() < 1e-6 && (px[1] - px[2]).abs() < 1e-6 && px[3] == 0.3, "{px:?}");
+        // Gamma lightening takes ink away from K too, as Grayscale lightens a grey.
+        let params = br#"{"gamma":50}"#;
+        let t = Precalc::new(&params::parse(params).unwrap());
+        let mut px = [0.1, 0.6, 0.9, 0.3, 0.6, 0.2, 0.3, 0.4, 0.5, 0.0];
+        filter_buffer(&mut px, 2, 1, 5, CMYK8 | 1 << 8, params).unwrap();
+        assert_eq!(px[3], 1.0 - tone(0.7, &t));
+        assert!(px[3] < 0.3);
+        assert_eq!(px[4], 0.6, "alpha kept");
+        assert_eq!(px[5..], [0.2, 0.3, 0.4, 0.5, 0.0], "transparent pixel skipped");
+    }
+
+    #[test]
     fn errors() {
         let mut px = [0.5f32; 8];
-        assert_eq!(filter_buffer(&mut px, 2, 1, 4, 8 | 4 << 16, b"{}"), Err(Error::UnsupportedMode));
+        assert_eq!(filter_buffer(&mut px, 2, 1, 4, 8 | 7 << 16, b"{}"), Err(Error::UnsupportedMode));
         assert_eq!(filter_buffer(&mut px, 2, 1, 1, 8 | 1 << 8 | 1 << 16, b"{}"), Err(Error::BadChannels));
         assert_eq!(filter_buffer(&mut px, 4, 1, 2, 8 | 3 << 16, b"{}"), Err(Error::BadChannels));
+        assert_eq!(filter_buffer(&mut px, 2, 1, 4, 8 | 1 << 8 | 4 << 16, b"{}"), Err(Error::BadChannels));
         assert_eq!(filter_buffer(&mut px, 3, 1, 4, RGBA8, b"{}"), Err(Error::BadBuffer));
         assert_eq!(filter_buffer(&mut px, 2, 1, 4, RGBA8, b"{"), Err(Error::BadParams));
     }

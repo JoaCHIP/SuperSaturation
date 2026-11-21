@@ -17,10 +17,12 @@ The default images are generated into target/photocraft-test:
 * Grayscale: 8-bit with and without transparent areas, 16-bit, and 32-bit float.
 * Lab, 8- and 16-bit: the RGB gradients converted to Lab, and sweeps over the whole a/b square at
   several lightnesses, most of it outside the sRGB gamut.
+* CMYK, 8- and 16-bit: the RGB gradients as inks with black generation varying from none to full,
+  a K ramp on its own and a rich black ramp.
 
 32-bit results are compared after clamping to 0–1 (the TIFF export clamps; the document itself keeps
 values outside 0–1, as the Photoshop version did) and at 16-bit precision (ImageMagick reads them at
-its Q16 precision). Lab documents are exported as PSD and read from the layer's own pixels: the
+its Q16 precision). Lab and CMYK documents are exported as PSD and read from the layer's own pixels: the
 merged image PhotoCraft writes next to them is clipped to sRGB. 16-bit Lab PSDs store a* and b* in
 steps of 1/256 (Photoshop's scale), not the document's 1/257: the 16-bit Lab test image uses whole
 a* and b* values, which both scales hold exactly, so "before" is exact, and the result loses up to
@@ -38,7 +40,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pc import ROOT, WORK, Client  # noqa: E402
 from psd import read_psd_layer, write_psd  # noqa: E402
 
-MODES = {1: "gray", 3: "rgb", 9: "lab"}
+MODES = {1: "gray", 3: "rgb", 4: "cmyk", 9: "lab"}
+COLOURS = {"gray": 1, "rgb": 3, "lab": 3, "cmyk": 4}
 
 CASES = [
     {},
@@ -112,8 +115,22 @@ def make_images():
     lab[..., 1:] = (np.round(lab[..., 1:] * 255 - 128) + 128) / 255  # whole a*, b*: see the docstring
     write_psd(os.path.join(WORK, "test-lab16.psd"), lab, 16, 9)
 
+    # CMYK: the RGB gradients as inks, with black generation from none (top) to full (bottom), so
+    # C, M, Y and K all vary; then a K ramp on its own, and a rich black ramp under a CMY ramp.
+    rgb = gradients[::2, ::2]
+    h, w = rgb.shape[:2]
+    full_k = 1 - rgb.max(-1)
+    k = full_k * np.linspace(0, 1, h)[:, None]
+    cmy = (1 - rgb - k[..., None]) / np.maximum(1 - k, 1e-6)[..., None]
+    ramp = np.broadcast_to(np.linspace(0, 1, w)[None, :], (24, w))
+    k_only = np.dstack([np.zeros_like(ramp)] * 3 + [ramp])
+    rich = np.dstack([ramp * 0.6, ramp * 0.5, ramp * 0.4, ramp[:, ::-1]])
+    cmyk = np.clip(np.concatenate([np.dstack([cmy, k]), k_only, rich], 0), 0, 1)
+    write_psd(os.path.join(WORK, "test-cmyk8.psd"), cmyk, 8, 4)
+    write_psd(os.path.join(WORK, "test-cmyk16.psd"), cmyk, 16, 4)
+
     return ["test-rgba8.png", "test-rgb16.png", "test-rgb32.tif", "test-gray8.png", "test-graya8.png", "test-gray16.png", "test-gray32.tif",
-            "test-lab8.psd", "test-lab16.psd"]
+            "test-lab8.psd", "test-lab16.psd", "test-cmyk8.psd", "test-cmyk16.psd"]
 
 
 def srgb_to_lab(rgb):
@@ -127,7 +144,7 @@ def srgb_to_lab(rgb):
 
 
 def read_image(path):
-    """(samples as float64 H×W×C, bit depth, mode name). PSDs (Lab) from the layer's pixels,
+    """(samples as float64 H×W×C, bit depth, mode name). PSDs (Lab, CMYK) from the layer's pixels,
     grey PNGs with Pillow, the rest with ImageMagick, so 16- and 32-bit images keep their precision."""
     if path.endswith(".psd"):
         a, depth, mode = read_psd_layer(path)
@@ -171,7 +188,7 @@ def main(extra):
         stem = os.path.splitext(os.path.basename(image))[0]
         ext = os.path.splitext(image)[1] if image.endswith((".tif", ".psd")) else ".png"  # PNG has no 32-bit
         before, depth, mode = read_image(c.save(f"{stem}-before{ext}"))
-        colours = 1 if mode == "gray" else 3
+        colours = COLOURS[mode]
         levels = 255.0 if depth <= 8 else 65535.0
         tolerance = 1.01 if (mode, depth) == ("lab", 16) else 0.51
         has_alpha = before.shape[2] > colours

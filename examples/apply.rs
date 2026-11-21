@@ -3,15 +3,16 @@
 //! Usage: cargo run --release --example apply -- IN.f32 OUT.f32 WIDTH HEIGHT CHANNELS 'PARAMS_JSON' [MODE]
 //!
 //! IN and OUT hold little-endian `f32` samples, interleaved, in the plug-in ABI's own layout and
-//! units (0–1; Lab as L*/100, (a* + 128)/255, (b* + 128)/255). MODE is `rgb` (the default), `gray`
-//! or `lab`; a fourth channel (RGB, Lab) or second one (gray) is alpha.
+//! units (0–1; Lab as L*/100, (a* + 128)/255, (b* + 128)/255). MODE is `rgb` (the default), `gray`,
+//! `lab` or `cmyk`; one channel more than the mode's colours (4 for RGB and Lab, 2 for gray, 5 for
+//! CMYK) is alpha.
 
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
     if !(7..=8).contains(&args.len()) {
-        eprintln!("usage: apply IN.f32 OUT.f32 WIDTH HEIGHT CHANNELS PARAMS_JSON [rgb|gray|lab]");
+        eprintln!("usage: apply IN.f32 OUT.f32 WIDTH HEIGHT CHANNELS PARAMS_JSON [rgb|gray|lab|cmyk]");
         return ExitCode::from(2);
     }
     let bytes = std::fs::read(&args[1]).expect("read input");
@@ -21,6 +22,7 @@ fn main() -> ExitCode {
         "rgb" => (3, 3),
         "gray" => (1, 1),
         "lab" => (9, 3),
+        "cmyk" => (4, 4),
         other => {
             eprintln!("unknown mode {other}");
             return ExitCode::from(2);

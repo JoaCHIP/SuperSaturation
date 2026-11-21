@@ -201,6 +201,22 @@ pub fn process_pixel(rgb: [f32; 3], t: &Precalc) -> [f32; 3] {
     [nr, ng, nb]
 }
 
+/// CMYK's C, M and Y inks (0 no ink, 1 full ink) through [`process_pixel`], as the RGB colour they
+/// leave on white paper (`1 − ink`), and back to inks. K is left to [`tone_ink`], so the black
+/// separation keeps its own shape.
+#[inline(always)]
+pub fn process_cmy([c, m, y]: [f32; 3], t: &Precalc) -> [f32; 3] {
+    let [r, g, b] = process_pixel([1.0 - c, 1.0 - m, 1.0 - y], t);
+    [1.0 - r, 1.0 - g, 1.0 - b]
+}
+
+/// One ink channel (CMYK's K) as Grayscale treats a grey: Gamma and Contrast on its brightness
+/// (`1 − ink`), so Gamma's lightening takes ink away.
+#[inline(always)]
+pub fn tone_ink(ink: f32, t: &Precalc) -> f32 {
+    1.0 - tone(1.0 - ink, t)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
