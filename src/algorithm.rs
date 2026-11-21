@@ -61,12 +61,12 @@ pub struct Precalc {
     pub warmth: f32,
     pub hue_shift: f32,
     /// `1 / warmth`, the exponent applied to red.
-    warmth_inv: f32,
+    pub(crate) warmth_inv: f32,
     /// `liveliness · gamma2`: both powers applied to saturation at once.
-    sat_exp: f32,
+    pub(crate) sat_exp: f32,
     /// `cos`/`sin` of the hue shift.
-    cos_shift: f32,
-    sin_shift: f32,
+    pub(crate) cos_shift: f32,
+    pub(crate) sin_shift: f32,
     /// `cos`/`sin` of ±120°, which the original evaluated for every pixel.
     cos_pos: f32,
     sin_pos: f32,
@@ -104,10 +104,35 @@ impl Precalc {
     }
 }
 
+impl Precalc {
+    /// Whether Gamma and Contrast leave the brightness alone ([`tone`] is the identity).
+    pub fn tone_is_identity(&self) -> bool {
+        self.gamma1 == 1.0 && !self.applies_contrast()
+    }
+
+    /// The original skips contrast up to 1 %.
+    #[inline(always)]
+    fn applies_contrast(&self) -> bool {
+        self.contrast < -0.01 || self.contrast > 0.01
+    }
+}
+
 /// `base^exp`, skipping the call when `exp` is exactly 1 (where it returns `base` unchanged).
 #[inline(always)]
-fn pow_unless_one(base: f32, exp: f32) -> f32 {
+pub(crate) fn pow_unless_one(base: f32, exp: f32) -> f32 {
     if exp == 1.0 { base } else { powf(base, exp) }
+}
+
+/// Gamma, then Contrast, on the brightness (`val`) alone: the part of [`process_pixel`] that
+/// Grayscale and Lab documents share with RGB ones.
+#[inline(always)]
+pub fn tone(val: f32, t: &Precalc) -> f32 {
+    let mut val = pow_unless_one(val, t.gamma1);
+    if t.applies_contrast() {
+        let contrast = -cosf(val * PI) * 0.5 + 0.5;
+        val = contrast * t.contrast + (1.0 - t.contrast) * val;
+    }
+    val
 }
 
 /// The original's `ProcessPixel()`: one RGB colour (0–1 per channel) in, one out. The result is not
@@ -117,7 +142,7 @@ pub fn process_pixel(rgb: [f32; 3], t: &Precalc) -> [f32; 3] {
     let [mut r, mut g, mut b] = rgb;
 
     // To "superHSV": brightness is the plain mean, saturation the summed pairwise chroma lengths.
-    let mut val = (r + g + b) / 3.0;
+    let val = (r + g + b) / 3.0;
     r -= val;
     g -= val;
     b -= val;
@@ -126,14 +151,9 @@ pub fn process_pixel(rgb: [f32; 3], t: &Precalc) -> [f32; 3] {
     let difgb = sqrtf(g * g + b * b);
     let mut sat = (difrg + difrb + difgb) * t.saturation;
 
-    // The original: sat = sat^liveliness; val = val^gamma1; sat = sat^gamma2.
+    // The original: sat = sat^liveliness; val = val^gamma1; sat = sat^gamma2; then contrast on val.
     sat = pow_unless_one(sat, t.sat_exp);
-    val = pow_unless_one(val, t.gamma1);
-
-    if t.contrast < -0.01 || t.contrast > 0.01 {
-        let contrast = -cosf(val * PI) * 0.5 + 0.5;
-        val = contrast * t.contrast + (1.0 - t.contrast) * val;
-    }
+    let val = tone(val, t);
 
     let mut mx = r;
     let mut my = 0.0;
@@ -241,6 +261,23 @@ mod tests {
         let bright = process_pixel(mid, &Precalc::new(&Settings { gamma: 50.0, ..Settings::default() }));
         let dark = process_pixel(mid, &Precalc::new(&Settings { gamma: -50.0, ..Settings::default() }));
         assert!(mean(bright) > mean(mid) && mean(dark) < mean(mid));
+    }
+
+    #[test]
+    fn tone_is_what_the_rgb_transform_does_to_greys() {
+        // Grayscale documents use tone() alone: the same as running a grey through process_pixel
+        // with Warmth neutral (the other sliders do nothing to greys), then taking (R + 2G + B) / 4.
+        for (gamma, contrast) in [(0.0, 0.0), (40.0, 0.0), (-70.0, 25.0), (100.0, -100.0), (-100.0, 100.0), (0.0, 1.0)] {
+            let s = Settings { saturation: 170.0, liveliness: 60.0, gamma, contrast, hue_shift: 77.0, ..Settings::default() };
+            let t = Precalc::new(&s);
+            for i in 0..=64 {
+                let v = i as f32 / 64.0;
+                let [r, g, b] = process_pixel([v; 3], &t);
+                let via_rgb = (r + g + g + b) * 0.25;
+                assert!((tone(v, &t) - via_rgb).abs() < 1e-6, "{s:?} {v}: {} vs {via_rgb}", tone(v, &t));
+            }
+            assert_eq!(t.tone_is_identity(), gamma == 0.0 && contrast.abs() <= 1.0);
+        }
     }
 
     #[test]

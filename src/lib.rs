@@ -1,18 +1,20 @@
 //! SuperSaturation by JoaCHIP, as a PhotoCraft filter plug-in (WebAssembly plug-in ABI v1).
 //!
 //! A port of the Photoshop filter at github.com/JoaCHIP/SuperSaturation. The colour transform
-//! itself is in [`algorithm`]; this file is the plug-in plumbing: the ABI exports, the pixel buffer
-//! and the colour-mode dispatch.
+//! itself is in [`algorithm`] (RGB, and the brightness curve Grayscale shares) and [`lab`] (Lab);
+//! this file is the plug-in plumbing: the ABI exports, the pixel buffer and the colour-mode dispatch.
 //!
 //! The host's sandbox allows no imports. `std` on `wasm32-unknown-unknown` has none (unlike WASI),
 //! and the plug-in never allocates, so it uses `std`: that gives `f32::sqrt` as the `f32.sqrt`
 //! instruction, which `no_std` code can't reach on stable Rust.
 
 pub mod algorithm;
+pub mod lab;
 pub mod mathf;
 pub mod params;
 
-use algorithm::{Precalc, process_pixel};
+use algorithm::{Precalc, process_pixel, tone};
+use lab::{LabPrecalc, process_lab};
 
 /// The manifest the host reads through `pc_manifest`: id, menu name, author and the parameters the
 /// host builds the dialog from.
@@ -51,11 +53,11 @@ impl Format {
 
 /// The document colour modes, numbered as in the PSD format (and the plug-in ABI).
 ///
-/// Only RGB is handled so far. The transform works on RGB colours, so another mode can be added by
-/// giving it its own branch in [`filter`] that converts each pixel to RGB, calls
-/// [`process_pixel`] and converts back (Grayscale: replicate the grey into R, G and B, then take the
-/// mean back; Lab and CMYK: a colour conversion each way). Alpha channels and Quick Mask targets
-/// arrive as one Grayscale channel.
+/// Handled: RGB (the original transform), Grayscale (its brightness curve: Gamma and Contrast) and
+/// Lab (the transform worked out on L, a and b directly, see [`lab`]). Another mode gets its own
+/// branch in [`filter`]; CMYK, for instance, could convert each pixel to RGB, call
+/// [`process_pixel`] and convert back. Alpha channels and Quick Mask targets arrive as one Grayscale
+/// channel, so they get the Grayscale treatment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ColorMode {
     Bitmap,
@@ -93,38 +95,47 @@ pub fn filter(samples: &mut [f32], channels: usize, format: Format, params_json:
     let settings = params::parse(params_json).map_err(|_| Error::BadParams)?;
     let t = Precalc::new(&settings);
     match format.mode {
-        ColorMode::Rgb => filter_rgb(samples, channels, format.alpha, &t),
+        ColorMode::Rgb => map_pixels::<3, 4>(samples, channels, format.alpha, |c| process_pixel(c, &t)),
+        // A grey has no hue or saturation, so only Gamma and Contrast act on it (the RGB transform
+        // gives a grey exactly this; Warmth, which would tint it, is ignored in Grayscale).
+        ColorMode::Grayscale if t.tone_is_identity() => map_pixels::<1, 2>(samples, channels, format.alpha, |c| c),
+        ColorMode::Grayscale => map_pixels::<1, 2>(samples, channels, format.alpha, |[v]| [tone(v, &t)]),
+        ColorMode::Lab => {
+            let lab = LabPrecalc::new(&t);
+            map_pixels::<3, 4>(samples, channels, format.alpha, |c| process_lab(c, &t, &lab))
+        }
         _ => Err(Error::UnsupportedMode),
     }
 }
 
-/// RGB, RGBA (or RGB plus further channels, which are left alone). Fully transparent pixels are
-/// skipped: their colour is invisible, and skipping them saves time.
-fn filter_rgb(samples: &mut [f32], channels: usize, alpha: bool, t: &Precalc) -> Result<(), Error> {
-    if channels < 3 || (alpha && channels < 4) {
+/// Applies `f` to the first `C` (colour) channels of every pixel. `CA` is `C + 1`, the pixel size
+/// with alpha. With `alpha`, the last channel is alpha: it is kept, and fully transparent pixels
+/// are skipped (their colour is invisible, and skipping them saves time). Channels between the
+/// colour and the alpha are left alone.
+fn map_pixels<const C: usize, const CA: usize>(samples: &mut [f32], channels: usize, alpha: bool, f: impl Fn([f32; C]) -> [f32; C]) -> Result<(), Error> {
+    const { assert!(CA == C + 1) };
+    if channels < C + usize::from(alpha) {
         return Err(Error::BadChannels);
     }
     // Fast paths for the common layouts: the interpreter rewards fewer instructions.
-    match (channels, alpha) {
-        (4, true) => {
-            for p in samples.as_chunks_mut::<4>().0 {
-                if p[3] > 0.0 {
-                    [p[0], p[1], p[2]] = process_pixel([p[0], p[1], p[2]], t);
-                }
+    if channels == C {
+        for p in samples.as_chunks_mut::<C>().0 {
+            *p = f(*p);
+        }
+    } else if channels == CA && alpha {
+        for p in samples.as_chunks_mut::<CA>().0 {
+            if p[C] > 0.0 {
+                let (colour, _) = p.split_first_chunk_mut::<C>().unwrap();
+                *colour = f(*colour);
             }
         }
-        (3, false) => {
-            for p in samples.as_chunks_mut::<3>().0 {
-                [p[0], p[1], p[2]] = process_pixel([p[0], p[1], p[2]], t);
+    } else {
+        for p in samples.chunks_exact_mut(channels) {
+            if alpha && p[channels - 1] <= 0.0 {
+                continue;
             }
-        }
-        _ => {
-            for p in samples.chunks_exact_mut(channels) {
-                if alpha && p[channels - 1] <= 0.0 {
-                    continue;
-                }
-                [p[0], p[1], p[2]] = process_pixel([p[0], p[1], p[2]], t);
-            }
+            let (colour, _) = p.split_first_chunk_mut::<C>().unwrap();
+            *colour = f(*colour);
         }
     }
     Ok(())
@@ -228,9 +239,42 @@ mod tests {
     }
 
     #[test]
+    fn grayscale_applies_gamma_and_contrast_only() {
+        let params = br#"{"saturation":180,"liveliness":50,"gamma":40,"contrast":30,"warmth":80,"hueShift":90}"#;
+        let t = Precalc::new(&params::parse(br#"{"gamma":40,"contrast":30}"#).unwrap());
+        let mut px = [0.2, 0.7, 1.0];
+        filter_buffer(&mut px, 3, 1, 1, 8 | 1 << 16, params).unwrap();
+        assert_eq!(px, [tone(0.2, &t), tone(0.7, &t), tone(1.0, &t)]);
+        // With alpha: alpha kept, transparent pixels skipped.
+        let mut px = [0.2, 0.5, 0.7, 0.0];
+        filter_buffer(&mut px, 2, 1, 2, 16 | 1 << 8 | 1 << 16, params).unwrap();
+        assert_eq!(px, [tone(0.2, &t), 0.5, 0.7, 0.0]);
+        // Only the sliders that do nothing to greys moved: nothing changes.
+        let mut px = [0.2, 0.7];
+        filter_buffer(&mut px, 2, 1, 1, 8 | 1 << 16, br#"{"saturation":0,"warmth":-50}"#).unwrap();
+        assert_eq!(px, [0.2, 0.7]);
+    }
+
+    #[test]
+    fn lab_with_and_without_alpha() {
+        let params = br#"{"saturation":150,"hueShift":40}"#;
+        let (t, p) = LabPrecalc::from_settings(&params::parse(params).unwrap());
+        let colour = [0.5, 0.7, 0.3];
+        let mut px = [colour, colour].concat();
+        filter_buffer(&mut px, 2, 1, 3, 16 | 9 << 16, params).unwrap();
+        assert_eq!(px[..3], process_lab(colour, &t, &p));
+        assert_eq!(px[3..], px[..3]);
+        let mut px = [0.5, 0.7, 0.3, 1.0, 0.5, 0.7, 0.3, 0.0];
+        filter_buffer(&mut px, 2, 1, 4, 8 | 1 << 8 | 9 << 16, params).unwrap();
+        assert_eq!(px[..4], [process_lab(colour, &t, &p).as_slice(), &[1.0]].concat());
+        assert_eq!(px[4..], [0.5, 0.7, 0.3, 0.0]);
+    }
+
+    #[test]
     fn errors() {
         let mut px = [0.5f32; 8];
-        assert_eq!(filter_buffer(&mut px, 2, 1, 1, 8 | 1 << 16, b"{}"), Err(Error::UnsupportedMode));
+        assert_eq!(filter_buffer(&mut px, 2, 1, 4, 8 | 4 << 16, b"{}"), Err(Error::UnsupportedMode));
+        assert_eq!(filter_buffer(&mut px, 2, 1, 1, 8 | 1 << 8 | 1 << 16, b"{}"), Err(Error::BadChannels));
         assert_eq!(filter_buffer(&mut px, 4, 1, 2, 8 | 3 << 16, b"{}"), Err(Error::BadChannels));
         assert_eq!(filter_buffer(&mut px, 3, 1, 4, RGBA8, b"{}"), Err(Error::BadBuffer));
         assert_eq!(filter_buffer(&mut px, 2, 1, 4, RGBA8, b"{"), Err(Error::BadParams));
