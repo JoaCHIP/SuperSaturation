@@ -219,13 +219,13 @@ mod tests {
         assert_eq!(keys, ["saturation", "liveliness", "gamma", "contrast", "warmth", "hueShift"]);
         assert_eq!(m["author"], "JoaCHIP");
         assert_eq!(m["name"], "SuperSaturation…");
-        assert_eq!(m["params"]["saturation"]["default"], 100);
+        assert_eq!(m["params"]["saturation"]["default"], 0);
     }
 
     #[test]
     fn rgba_keeps_alpha_and_skips_transparent_pixels() {
         let mut px = [0.8, 0.3, 0.1, 0.5, 0.8, 0.3, 0.1, 0.0];
-        filter_buffer(&mut px, 2, 1, 4, RGBA8, br#"{"saturation":0}"#).unwrap();
+        filter_buffer(&mut px, 2, 1, 4, RGBA8, br#"{"saturation":-100}"#).unwrap();
         assert!((px[0] - 0.4).abs() < 1e-6 && (px[2] - 0.4).abs() < 1e-6);
         assert_eq!(px[3], 0.5);
         assert_eq!(&px[4..], &[0.8, 0.3, 0.1, 0.0]);
@@ -234,13 +234,13 @@ mod tests {
     #[test]
     fn rgb_without_alpha() {
         let mut px = [0.8, 0.3, 0.1, 0.0, 0.0, 1.0];
-        filter_buffer(&mut px, 1, 2, 3, RGB16, br#"{"saturation":0}"#).unwrap();
+        filter_buffer(&mut px, 1, 2, 3, RGB16, br#"{"saturation":-100}"#).unwrap();
         assert!((px[0] - 0.4).abs() < 1e-6 && (px[5] - 1.0 / 3.0).abs() < 1e-6, "{px:?}");
     }
 
     #[test]
     fn grayscale_applies_gamma_and_contrast_only() {
-        let params = br#"{"saturation":180,"liveliness":50,"gamma":40,"contrast":30,"warmth":80,"hueShift":90}"#;
+        let params = br#"{"saturation":80,"liveliness":50,"gamma":40,"contrast":30,"warmth":80,"hueShift":90}"#;
         let t = Precalc::new(&params::parse(br#"{"gamma":40,"contrast":30}"#).unwrap());
         let mut px = [0.2, 0.7, 1.0];
         filter_buffer(&mut px, 3, 1, 1, 8 | 1 << 16, params).unwrap();
@@ -251,13 +251,13 @@ mod tests {
         assert_eq!(px, [tone(0.2, &t), 0.5, 0.7, 0.0]);
         // Only the sliders that do nothing to greys moved: nothing changes.
         let mut px = [0.2, 0.7];
-        filter_buffer(&mut px, 2, 1, 1, 8 | 1 << 16, br#"{"saturation":0,"warmth":-50}"#).unwrap();
+        filter_buffer(&mut px, 2, 1, 1, 8 | 1 << 16, br#"{"saturation":-100,"warmth":-50}"#).unwrap();
         assert_eq!(px, [0.2, 0.7]);
     }
 
     #[test]
     fn lab_with_and_without_alpha() {
-        let params = br#"{"saturation":150,"hueShift":40}"#;
+        let params = br#"{"saturation":50,"hueShift":40}"#;
         let (t, p) = LabPrecalc::from_settings(&params::parse(params).unwrap());
         let colour = [0.5, 0.7, 0.3];
         let mut px = [colour, colour].concat();

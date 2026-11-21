@@ -6,7 +6,7 @@
   "author": "JoaCHIP",
   "description": "SuperSaturation by JoaCHIP. Saturation, liveliness, gamma, contrast, warmth and hue shift, worked out in an HSB-like colour space that keeps colours looking natural. For RGB, Grayscale and Lab images; in Grayscale only Gamma and Contrast act.",
   "params": {
-    "saturation": {"type": "number", "min": 0, "max": 200, "default": 100},
+    "saturation": {"type": "number", "min": -100, "max": 100, "default": 0},
     "liveliness": {"type": "number", "min": -100, "max": 100, "default": 0},
     "gamma": {"type": "number", "min": -100, "max": 100, "default": 0},
     "contrast": {"type": "number", "min": -100, "max": 100, "default": 0},

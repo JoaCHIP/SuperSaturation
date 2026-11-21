@@ -26,16 +26,17 @@ const PI: f32 = 3.141593;
 /// The original's value of 120° in radians (`2.094395f`).
 const THIRD_TURN: f32 = 2.094395;
 
-/// The six slider values, in the dialog's units.
+/// The six slider values, in the original filter's units ([`crate::params`] maps the dialog's
+/// onto these).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Settings {
-    /// 0 to 200; neutral 100.
+    /// 0 to 200; neutral 100. The dialog shows it as -100 to 100, neutral 0.
     pub saturation: f32,
     /// -100 to 100; neutral 0.
     pub liveliness: f32,
     /// -100 to 100; neutral 0.
     pub gamma: f32,
-    /// -100 to 100; neutral 0.
+    /// -100 to 100 in the original; neutral 0. The dialog's -100 to 100 doubles to -200 to 200.
     pub contrast: f32,
     /// -100 to 100; neutral 0.
     pub warmth: f32,

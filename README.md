@@ -9,10 +9,10 @@ with built-in ones on paper; they look different in practice.
 
 | Slider | Range | Neutral | What it does |
 |---|---|---|---|
-| Saturation | 0 to 200 | 100 | More or less color. |
+| Saturation | -100 to 100 | 0 | More or less color; -100 gives grayscale. |
 | Liveliness | -100 to 100 | 0 | More color in muted areas, without pushing areas that are already strongly colored. |
 | Gamma | -100 to 100 | 0 | A gamma curve on the brightness channel only: brighter or darker while keeping colors accurate. |
-| Contrast | -100 to 100 | 0 | A sine-shaped S-curve on the brightness channel only. |
+| Contrast | -100 to 100 | 0 | A sine-shaped S-curve on the brightness channel only, twice as strong as in the Photoshop version. |
 | Warmth | -100 to 100 | 0 | Leans the image towards orange (warm) or towards blue (cold) colors. |
 | Hue Shift | -180 to 180° | 0 | Rotates every hue around the color wheel. |
 

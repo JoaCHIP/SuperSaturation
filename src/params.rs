@@ -3,6 +3,10 @@
 //! The host validates the values against the manifest before calling (missing ones take their
 //! defaults, numbers are clamped into range), so this only has to find the six numbers among the
 //! object's top-level keys and skip everything else, such as the nested `_image` object.
+//!
+//! Two sliders read differently in the dialog than in the original filter, and are mapped here:
+//! Saturation runs -100 to 100 with 0 neutral (the original's 0 to 200 with 100 neutral, shifted
+//! by 100), and Contrast acts twice as strongly as the original's (its value is doubled).
 
 use crate::algorithm::Settings;
 
@@ -12,9 +16,16 @@ pub struct ParseError;
 
 type Result<T> = core::result::Result<T, ParseError>;
 
-/// The settings in `json`; a key that is missing keeps its neutral value.
+/// The settings in `json`, in the original filter's units; a key that is missing keeps its neutral
+/// value.
 pub fn parse(json: &[u8]) -> Result<Settings> {
-    let mut s = Settings::default();
+    let dialog = parse_dialog(json)?;
+    Ok(Settings { saturation: dialog.saturation + 100.0, contrast: dialog.contrast * 2.0, ..dialog })
+}
+
+/// The six values as the dialog shows them (Saturation neutral at 0); missing ones are neutral.
+fn parse_dialog(json: &[u8]) -> Result<Settings> {
+    let mut s = Settings { saturation: 0.0, ..Settings::default() };
     let mut p = Parser { s: json, i: 0 };
     p.ws();
     p.expect(b'{')?;
@@ -189,19 +200,21 @@ mod tests {
 
     #[test]
     fn reads_the_hosts_parameters() {
-        let json = br#"{"saturation": 150, "liveliness": -20.5, "gamma": 1e1, "contrast": -100,
+        let json = br#"{"saturation": 50, "liveliness": -20.5, "gamma": 1e1, "contrast": -40,
             "warmth": 0.25, "hueShift": -180,
             "_image": {"x": 0, "y": 256, "width": 1024, "height": 256, "overlap": 0,
                        "canvasWidth": 6000, "canvasHeight": 4000, "mode": "rgb", "depth": 8,
                        "alpha": true, "channels": 4, "nested": [1, {"a": null}, "x\"y"], "f": false}}"#;
         let s = parse(json).unwrap();
-        assert_eq!(s, Settings { saturation: 150.0, liveliness: -20.5, gamma: 10.0, contrast: -100.0, warmth: 0.25, hue_shift: -180.0 });
+        assert_eq!(s, Settings { saturation: 150.0, liveliness: -20.5, gamma: 10.0, contrast: -80.0, warmth: 0.25, hue_shift: -180.0 });
     }
 
     #[test]
     fn missing_keys_stay_neutral() {
         assert_eq!(parse(b"{}").unwrap(), Settings::default());
         assert_eq!(parse(br#"{"gamma":-5}"#).unwrap(), Settings { gamma: -5.0, ..Settings::default() });
+        // Saturation's dialog range is the original's shifted by 100, Contrast's is half as strong.
+        assert_eq!(parse(br#"{"saturation":-100,"contrast":100}"#).unwrap(), Settings { saturation: 0.0, contrast: 200.0, ..Settings::default() });
         // `_image` nested keys must not be mistaken for parameters.
         assert_eq!(parse(br#"{"_image":{"gamma":7}}"#).unwrap(), Settings::default());
     }

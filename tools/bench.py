@@ -18,9 +18,9 @@ from psd import write_psd  # noqa: E402
 
 CASES = [
     ("neutral", {}),
-    ("saturation", {"saturation": 150}),
+    ("saturation", {"saturation": 50}),
     ("gamma + contrast", {"gamma": 20, "contrast": 30}),
-    ("every slider", {"saturation": 150, "liveliness": 40, "gamma": 20, "contrast": 30, "warmth": 20, "hueShift": 15}),
+    ("every slider", {"saturation": 50, "liveliness": 40, "gamma": 20, "contrast": 30, "warmth": 20, "hueShift": 15}),
 ]
 
 

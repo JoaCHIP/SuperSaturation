@@ -42,11 +42,11 @@ MODES = {1: "gray", 3: "rgb", 9: "lab"}
 
 CASES = [
     {},
-    {"saturation": 180, "warmth": 40},
-    {"saturation": 60, "liveliness": -50, "gamma": -30, "contrast": -40, "warmth": -20, "hueShift": -90},
-    {"saturation": 200, "liveliness": 100, "gamma": 100, "contrast": 100, "warmth": 100, "hueShift": 180},
-    {"saturation": 0, "liveliness": -100, "gamma": -100, "contrast": -100, "warmth": -100, "hueShift": -180},
-    {"saturation": 130, "liveliness": 70, "gamma": -10, "contrast": 55, "warmth": -35, "hueShift": 33},
+    {"saturation": 80, "warmth": 40},
+    {"saturation": -40, "liveliness": -50, "gamma": -30, "contrast": -40, "warmth": -20, "hueShift": -90},
+    {"saturation": 100, "liveliness": 100, "gamma": 100, "contrast": 100, "warmth": 100, "hueShift": 180},
+    {"saturation": -100, "liveliness": -100, "gamma": -100, "contrast": -100, "warmth": -100, "hueShift": -180},
+    {"saturation": 30, "liveliness": 70, "gamma": -10, "contrast": 55, "warmth": -35, "hueShift": 33},
     {"contrast": 1, "hueShift": 1},
 ]
 
